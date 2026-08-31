@@ -37,6 +37,12 @@ class _SimulationScreenState extends State<SimulationScreen>
     _controller = AnimationController(
         vsync: this, duration: const Duration(seconds: 15));
     _controller.addListener(_onAnimationTick);
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        _synth.stopDrone();
+        setState(() {}); // Update the Play button UI
+      }
+    });
   }
 
   void _onAnimationTick() {

@@ -218,6 +218,59 @@ class WebAudioSynth {
     osc.start(now); osc.stop(now + 0.60);
   }
 
+  web.GainNode? _droneGain;
+  web.OscillatorNode? _droneOsc1;
+  web.OscillatorNode? _droneOsc2;
+
+  void startDrone(String scale) {
+    if (_ctx == null || _masterGain == null) return;
+    ensureResumed();
+    stopDrone();
+
+    int root = 48; // Default C
+    if (scale == 'minor') root = 45; // A2
+    if (scale == 'phrygian') root = 48; // C3
+
+    final now = _ctx!.currentTime;
+    _droneGain = _ctx!.createGain();
+    _droneGain!.gain.setValueAtTime(0, now);
+    _droneGain!.gain.linearRampToValueAtTime(0.35, now + 5.0); // 5 sec fade-in
+
+    _droneOsc1 = _ctx!.createOscillator();
+    _droneOsc1!.type = 'sine';
+    _droneOsc1!.frequency.value = _freq(root - 12); // Deep bass
+
+    _droneOsc2 = _ctx!.createOscillator();
+    _droneOsc2!.type = 'triangle';
+    _droneOsc2!.frequency.value = _freq(root) + 0.3; // Slight detune for phasing/movement
+
+    final lpf = _filter('lowpass', 300, q: 0.5);
+
+    _droneOsc1!.connect(_droneGain!);
+    _droneOsc2!.connect(_droneGain!);
+    _droneGain!.connect(lpf);
+    lpf.connect(_masterGain!);
+
+    _droneOsc1!.start(now);
+    _droneOsc2!.start(now);
+  }
+
+  void stopDrone() {
+    if (_droneGain != null && _ctx != null) {
+      final now = _ctx!.currentTime;
+      _droneGain!.gain.cancelScheduledValues(now);
+      _droneGain!.gain.setValueAtTime(_droneGain!.gain.value, now);
+      _droneGain!.gain.linearRampToValueAtTime(0.001, now + 3.0);
+      
+      _droneOsc1?.stop(now + 3.1);
+      _droneOsc2?.stop(now + 3.1);
+      
+      _droneGain = null;
+      _droneOsc1 = null;
+      _droneOsc2 = null;
+    }
+  }
+
   // ── Dispatcher ───────────────────────────────────────────────────────────
   void playVoice(int voice, int pitch, int velocity) {
     if (_ctx == null || _masterGain == null) return;

@@ -66,12 +66,12 @@ CHORD_DUR = BEAT * 16 # Chord changes every 4 bars (16 beats)
 # ─── Voice configuration ─────────────────────────────────────────────────────
 # (period_frames, offset_frames, register_bias, rest_prob)
 VOICE_CONFIG = [
-    (BEAT * 2,  0,          0.1,  0.10),   # 0  bass (low register, rare rests)
-    (BEAT * 4,  0,          0.3,  0.15),   # 1  pad (mid-low)
-    (BEAT,      0,          0.5,  0.25),   # 2  inner_low (mid)
-    (BEAT,      BEAT,       0.6,  0.25),   # 3  inner_high (mid-high)
-    (BEAT,      0,          0.8,  0.15),   # 4  melody (high)
-    (BEAT,      HALF_BEAT,  0.9,  0.40),   # 5  ornament (highest, many rests)
+    (BEAT * 4,  0,          0.1,  0.0),    # 0  bass (plays exactly on downbeats, never rests)
+    (BEAT * 8,  0,          0.3,  0.1),    # 1  pad (long slow chords)
+    (BEAT * 2,  0,          0.5,  0.35),   # 2  inner_low (mid)
+    (BEAT,      BEAT,       0.6,  0.45),   # 3  inner_high (mid-high)
+    (BEAT,      0,          0.8,  0.55),   # 4  melody (high, sparse, melodic phrases)
+    (HALF_BEAT, HALF_BEAT,  0.9,  0.75),   # 5  ornament (highest, rare fast sprinkles)
 ]
 
 LOCO_MODES = ["downhill", "uphill", "contour", "explorer"]

@@ -133,18 +133,24 @@ class _SimulationScreenState extends State<SimulationScreen>
 
     if (_controller.isAnimating) {
       _controller.stop();
+      _synth.stopDrone();
     } else {
       if (_controller.isCompleted) {
         _controller.reset();
         setState(() => _currentFrame = 0);
       }
       _controller.forward();
+      
+      // Start the ambient drone based on the current scale
+      final scale = _simulationData!.imageStats?.scale ?? 'minor';
+      _synth.startDrone(scale);
     }
     setState(() {});
   }
 
   @override
   void dispose() {
+    _synth.stopDrone();
     _controller.dispose();
     super.dispose();
   }

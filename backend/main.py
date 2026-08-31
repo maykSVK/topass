@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from physics import Simulation
 import uvicorn
@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 @app.post("/simulate")
-async def simulate(image: UploadFile = File(...)):
+async def simulate(image: UploadFile = File(...), duration: int = Form(15)):
     """
     Receives an image, runs the topographic agents physics simulation,
     and returns the paths and note events.
@@ -25,9 +25,11 @@ async def simulate(image: UploadFile = File(...)):
         # Read the uploaded image bytes
         image_bytes = await image.read()
         
+        # Calculate number of frames (40 frames per second)
+        frames = duration * 40
+        
         # Initialize and run the simulation
-        # 6 agents, 400 frames, contour interval of 15 brightness units
-        sim = Simulation(image_bytes=image_bytes, num_agents=12, frames=400, contour_interval=10)
+        sim = Simulation(image_bytes=image_bytes, num_agents=12, frames=frames, contour_interval=10)
         result = sim.run()
         
         return result

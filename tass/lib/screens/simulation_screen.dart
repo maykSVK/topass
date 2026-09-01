@@ -27,7 +27,14 @@ class _SimulationScreenState extends State<SimulationScreen>
   late AnimationController _controller;
   int _currentFrame = 0;
   int _maxFrames = 0;
-  double _durationSeconds = 15.0; // Default duration
+
+  // ── Audio / playback parameters ──────────────────────────────────────────
+  double _durationSeconds = 15.0;
+  double _masterVolume    = 0.65;
+  double _reverbWet       = 0.42;
+  double _delayTime       = 0.11;
+  bool   _droneEnabled    = true;
+  bool   _settingsOpen    = false;
 
   final WebAudioSynth _synth = WebAudioSynth();
 
@@ -35,21 +42,19 @@ class _SimulationScreenState extends State<SimulationScreen>
   void initState() {
     super.initState();
     _controller = AnimationController(
-        vsync: this, duration: const Duration(seconds: 15));
+        vsync: this, duration: Duration(seconds: _durationSeconds.round()));
     _controller.addListener(_onAnimationTick);
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _synth.stopDrone();
-        setState(() {}); // Update the Play button UI
+        setState(() {});
       }
     });
   }
 
   void _onAnimationTick() {
     if (_simulationData == null || _maxFrames == 0) return;
-
     int newFrame = (_controller.value * _maxFrames).floor();
-
     if (newFrame != _currentFrame) {
       for (var agent in _simulationData!.agents) {
         for (var event in agent.events) {
@@ -58,10 +63,7 @@ class _SimulationScreenState extends State<SimulationScreen>
           }
         }
       }
-
-      setState(() {
-        _currentFrame = newFrame;
-      });
+      setState(() => _currentFrame = newFrame);
     }
   }
 
@@ -72,9 +74,7 @@ class _SimulationScreenState extends State<SimulationScreen>
     );
 
     if (result != null && result.files.single.bytes != null) {
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
 
       Uint8List fileBytes = result.files.single.bytes!;
       String fileName = result.files.single.name;
@@ -102,11 +102,10 @@ class _SimulationScreenState extends State<SimulationScreen>
 
           int maxF = 0;
           for (var agent in simData.agents) {
-            if (agent.path.length > maxF) {
-              maxF = agent.path.length;
-            }
+            if (agent.path.length > maxF) maxF = agent.path.length;
           }
 
+          // Fix: honour the current _durationSeconds when computing controller duration
           final tempo = simData.imageStats?.tempoMultiplier ?? 1.0;
           final durationSecs = (_durationSeconds / tempo).clamp(2.0, 120.0).round();
 
@@ -117,16 +116,15 @@ class _SimulationScreenState extends State<SimulationScreen>
             _currentFrame = 0;
             _isLoading = false;
           });
-
           _controller.duration = Duration(seconds: durationSecs);
         } else {
           // ignore: avoid_print
-          print("Backend error: ${response.body}");
+          print('Backend error: ${response.body}');
           setState(() => _isLoading = false);
         }
       } catch (e) {
         // ignore: avoid_print
-        print("Error connecting to backend: $e");
+        print('Error connecting to backend: $e');
         setState(() => _isLoading = false);
       }
     }
@@ -134,7 +132,6 @@ class _SimulationScreenState extends State<SimulationScreen>
 
   void _togglePlayback() {
     if (_simulationData == null) return;
-
     _synth.ensureResumed();
 
     if (_controller.isAnimating) {
@@ -146,12 +143,20 @@ class _SimulationScreenState extends State<SimulationScreen>
         setState(() => _currentFrame = 0);
       }
       _controller.forward();
-      
-      // Start the ambient drone based on the current scale
-      final scale = _simulationData!.imageStats?.scale ?? 'minor';
-      _synth.startDrone(scale);
+      if (_droneEnabled) {
+        final scale = _simulationData!.imageStats?.scale ?? 'interstellar';
+        _synth.startDrone(scale);
+      }
     }
     setState(() {});
+  }
+
+  /// Called whenever duration slider changes – also updates controller if not animating
+  void _onDurationChanged(double val) {
+    setState(() => _durationSeconds = val);
+    if (!_controller.isAnimating) {
+      _controller.duration = Duration(seconds: val.round());
+    }
   }
 
   @override
@@ -161,225 +166,401 @@ class _SimulationScreenState extends State<SimulationScreen>
     super.dispose();
   }
 
-  Widget _buildMoodBanner() {
-    if (_simulationData == null || _simulationData!.imageStats == null) {
-      return const SizedBox.shrink();
-    }
+  // ── Mood banner (scale-aware labels) ────────────────────────────────────
+  Widget _buildMoodBanner(bool isMobile) {
+    if (_simulationData?.imageStats == null) return const SizedBox.shrink();
     final stats = _simulationData!.imageStats!;
-    String icon = '';
-    String mood = '';
-    String desc = '';
-
-    switch (stats.scale) {
-      case 'lydian':
-        icon = '☀️';
-        mood = 'Lydian (Bright / Open)';
-        desc = 'High brightness signature detected. Harmonizing in major.';
-        break;
-      case 'phrygian':
-        icon = '🌑';
-        mood = 'Phrygian (Dark / Tense)';
-        desc = 'Low brightness signature detected. Harmonizing with tension.';
-        break;
-      case 'minor':
-      default:
-        icon = '🌙';
-        mood = 'Minor (Melancholic / Flowing)';
-        desc = 'Mid-range brightness signature. Harmonizing in natural minor.';
-        break;
-    }
+    final (icon, mood, desc) = switch (stats.scale) {
+      'inception'    => ('✨', 'Inception (Dreamy / Dorian)',      'Bright image → hypnotic Dorian ostinato.'),
+      'interstellar' => ('🌌', 'Interstellar (Epic / Aeolian)',    'Mid brightness → open fifths, epic swells.'),
+      'gladiator'    => ('⚔️', 'Gladiator (Dark / Phrygian)',     'Dark image → Andalusian cadence, tension.'),
+      _              => ('🎵', 'Unknown',                          ''),
+    };
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark
+        ? const Color(0xFF1A1A24)
+        : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1A24) : Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isDark ? Colors.indigo.withOpacity(0.3) : Colors.transparent),
-      ),
-      padding: const EdgeInsets.all(20.0),
-      child: Row(
+    final statsWidget = Column(
+      crossAxisAlignment: isMobile ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+      children: [
+        Text('Tempo: ${(stats.tempoMultiplier * 100).round()}%',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13,
+                color: isDark ? Colors.white : Colors.black87)),
+        const SizedBox(height: 2),
+        Text('Edge: ${(stats.edgeDensity * 100).toStringAsFixed(1)}%',
+            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+      ],
+    );
+
+    final textBlock = Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 40)),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Sonic Profile: $mood', 
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
-                const SizedBox(height: 4),
-                Text(desc, 
-                  style: TextStyle(color: isDark ? Colors.white70 : Colors.black87.withOpacity(0.7), fontSize: 14)),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF232332) : Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))
-              ]
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                 Text('Tempo: ${(stats.tempoMultiplier * 100).round()}%', 
-                   style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
-                 const SizedBox(height: 2),
-                 Text('Edge Density: ${(stats.edgeDensity * 100).toStringAsFixed(1)}%', 
-                   style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
-              ]
-            )
-          )
+          Text('$icon  $mood',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: isMobile ? 13 : 15,
+                  color: isDark ? Colors.white : Colors.black87)),
+          const SizedBox(height: 3),
+          Text(desc,
+              style: TextStyle(fontSize: isMobile ? 11 : 13,
+                  color: isDark ? Colors.white60 : Colors.black54)),
+          if (isMobile) ...[const SizedBox(height: 6), statsWidget],
         ],
       ),
+    );
+
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 24, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? Colors.indigo.withOpacity(0.25) : Colors.transparent),
+      ),
+      padding: EdgeInsets.all(isMobile ? 12 : 16),
+      child: Row(
+        children: [
+          textBlock,
+          if (!isMobile) ...[const SizedBox(width: 16), statsWidget],
+        ],
+      ),
+    );
+  }
+
+  // ── Settings panel (collapsible) ─────────────────────────────────────────
+  Widget _buildSettingsPanel(bool isMobile) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final panelBg = isDark ? const Color(0xFF1A1A2E) : Colors.grey.shade50;
+    final labelStyle = TextStyle(
+        fontSize: 12, fontWeight: FontWeight.w600,
+        color: isDark ? Colors.white70 : Colors.black54);
+    final valueStyle = TextStyle(
+        fontSize: 12, fontWeight: FontWeight.w700,
+        color: isDark ? Colors.white : Colors.black87);
+
+    Widget _row(String label, String value, Widget slider) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        SizedBox(width: isMobile ? 72 : 90,
+            child: Text(label, style: labelStyle)),
+        Expanded(child: slider),
+        SizedBox(width: isMobile ? 42 : 52,
+            child: Text(value, style: valueStyle, textAlign: TextAlign.right)),
+      ]),
+    );
+
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Duration
+        _row(
+          'Duration',
+          '${_durationSeconds.round()}s',
+          Slider(
+            value: _durationSeconds, min: 5, max: 60, divisions: 11,
+            onChanged: _isLoading ? null : _onDurationChanged,
+          ),
+        ),
+        // Master volume
+        _row(
+          'Volume',
+          '${(_masterVolume * 100).round()}%',
+          Slider(
+            value: _masterVolume, min: 0.0, max: 1.0, divisions: 20,
+            onChanged: (v) {
+              setState(() => _masterVolume = v);
+              _synth.setMasterVolume(v);
+            },
+          ),
+        ),
+        // Reverb
+        _row(
+          'Reverb',
+          '${(_reverbWet * 100).round()}%',
+          Slider(
+            value: _reverbWet, min: 0.0, max: 1.0, divisions: 20,
+            onChanged: (v) {
+              setState(() => _reverbWet = v);
+              _synth.setReverbWet(v);
+            },
+          ),
+        ),
+        // Delay
+        _row(
+          'Delay',
+          '${(_delayTime * 1000).round()}ms',
+          Slider(
+            value: _delayTime, min: 0.0, max: 0.5, divisions: 25,
+            onChanged: (v) {
+              setState(() => _delayTime = v);
+              _synth.setDelayTime(v);
+            },
+          ),
+        ),
+        // Drone toggle
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: [
+            SizedBox(width: isMobile ? 72 : 90,
+                child: Text('Drone', style: labelStyle)),
+            Switch(
+              value: _droneEnabled,
+              onChanged: (v) {
+                setState(() => _droneEnabled = v);
+                if (!v) _synth.stopDrone();
+              },
+            ),
+            const SizedBox(width: 8),
+            Text(_droneEnabled ? 'On' : 'Off', style: valueStyle),
+          ]),
+        ),
+      ],
+    );
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      margin: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 24),
+      decoration: BoxDecoration(
+        color: panelBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.indigo.withOpacity(0.2) : Colors.grey.shade200,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header / toggle row
+          InkWell(
+            onTap: () => setState(() => _settingsOpen = !_settingsOpen),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                  horizontal: isMobile ? 14 : 18, vertical: isMobile ? 10 : 12),
+              child: Row(children: [
+                Icon(Icons.tune_rounded, size: 18,
+                    color: isDark ? Colors.white60 : Colors.black54),
+                const SizedBox(width: 8),
+                Text('Sound Settings',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black87)),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: _settingsOpen ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.expand_more_rounded, size: 20,
+                      color: isDark ? Colors.white38 : Colors.black38),
+                ),
+              ]),
+            ),
+          ),
+          // Expandable body
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: EdgeInsets.fromLTRB(
+                  isMobile ? 8 : 14, 0, isMobile ? 8 : 14, isMobile ? 8 : 12),
+              child: content,
+            ),
+            crossFadeState: _settingsOpen
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── AppBar ───────────────────────────────────────────────────────────────
+  PreferredSizeWidget _buildAppBar(bool isMobile, bool isDark) {
+    final logo = ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Transform.scale(
+        scale: 1.35,
+        alignment: const Alignment(0, -0.2),
+        child: Image.network('logo.jpg',
+            fit: BoxFit.cover,
+            width: isMobile ? 44 : 64,
+            height: isMobile ? 44 : 64,
+            errorBuilder: (c, e, s) => const Icon(Icons.music_note, size: 28)),
+      ),
+    );
+
+    final title = isMobile
+        ? Text('TASS',
+            style: TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w900,
+                color: Theme.of(context).colorScheme.primary))
+        : RichText(
+            text: TextSpan(children: [
+              TextSpan(text: 'Top',
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary,
+                      fontSize: 22, fontWeight: FontWeight.w900)),
+              TextSpan(text: 'ographic ',
+                  style: TextStyle(color: isDark ? Colors.white60 : Colors.black54,
+                      fontSize: 17, fontWeight: FontWeight.w300)),
+              TextSpan(text: 'A',
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary,
+                      fontSize: 22, fontWeight: FontWeight.w900)),
+              TextSpan(text: 'gents ',
+                  style: TextStyle(color: isDark ? Colors.white60 : Colors.black54,
+                      fontSize: 17, fontWeight: FontWeight.w300)),
+              TextSpan(text: 'S',
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary,
+                      fontSize: 22, fontWeight: FontWeight.w900)),
+              TextSpan(text: 'onification ',
+                  style: TextStyle(color: isDark ? Colors.white60 : Colors.black54,
+                      fontSize: 17, fontWeight: FontWeight.w300)),
+              TextSpan(text: 'S',
+                  style: TextStyle(color: Theme.of(context).colorScheme.primary,
+                      fontSize: 22, fontWeight: FontWeight.w900)),
+              TextSpan(text: 'ystem',
+                  style: TextStyle(color: isDark ? Colors.white60 : Colors.black54,
+                      fontSize: 17, fontWeight: FontWeight.w300)),
+            ]),
+          );
+
+    final themeBtn = IconButton(
+      icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode, size: 20),
+      onPressed: () => themeNotifier.value = isDark ? ThemeMode.light : ThemeMode.dark,
+      tooltip: 'Toggle Theme',
+    );
+
+    final uploadBtn = isMobile
+        ? IconButton(
+            icon: const Icon(Icons.upload_file_rounded, size: 22),
+            onPressed: _isLoading ? null : _uploadImage,
+            tooltip: 'Upload image',
+          )
+        : ElevatedButton.icon(
+            onPressed: _isLoading ? null : _uploadImage,
+            icon: const Icon(Icons.upload_file_rounded, size: 17),
+            label: const Text('Upload'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+          );
+
+    final playBtn = _simulationData == null
+        ? null
+        : isMobile
+            ? IconButton(
+                icon: Icon(
+                    _controller.isAnimating
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    size: 26),
+                onPressed: _togglePlayback,
+              )
+            : ElevatedButton.icon(
+                onPressed: _togglePlayback,
+                icon: Icon(
+                    _controller.isAnimating
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    size: 17),
+                label: Text(_controller.isAnimating ? 'Pause' : 'Play'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              );
+
+    return AppBar(
+      toolbarHeight: isMobile ? 56 : 72,
+      title: Row(children: [
+        logo,
+        const SizedBox(width: 10),
+        title,
+      ]),
+      actions: [
+        uploadBtn,
+        if (playBtn != null) playBtn,
+        themeBtn,
+        SizedBox(width: isMobile ? 4 : 8),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screenW = MediaQuery.of(context).size.width;
+    final isMobile = screenW < 600;
+    final hPad = isMobile ? 12.0 : 24.0;
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 85,
-        title: Row(
-          children: [
-            Container(
-              height: 64,
-              width: 100,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  )
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Transform.scale(
-                  scale: 1.35,
-                  alignment: const Alignment(0, -0.2), // Shift slightly to ensure bottom text is fully visible
-                  child: Image.network('logo.jpg', fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.music_note, size: 32)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 20),
-            RichText(
-              text: TextSpan(
-                children: [
-                  TextSpan(text: 'Top', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 26, fontWeight: FontWeight.w900)),
-                  TextSpan(text: 'ographic ', style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 20, fontWeight: FontWeight.w300)),
-                  TextSpan(text: 'A', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 26, fontWeight: FontWeight.w900)),
-                  TextSpan(text: 'gents ', style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 20, fontWeight: FontWeight.w300)),
-                  TextSpan(text: 'S', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 26, fontWeight: FontWeight.w900)),
-                  TextSpan(text: 'onification ', style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 20, fontWeight: FontWeight.w300)),
-                  TextSpan(text: 'S', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 26, fontWeight: FontWeight.w900)),
-                  TextSpan(text: 'ystem', style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 20, fontWeight: FontWeight.w300)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton.icon(
-            onPressed: _isLoading ? null : _uploadImage,
-            icon: const Icon(Icons.upload_file_rounded, size: 18),
-            label: const Text('Upload'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
-          ),
-          const SizedBox(width: 12),
-          if (_simulationData != null) ...[
-            ElevatedButton.icon(
-              onPressed: _togglePlayback,
-              icon: Icon(_controller.isAnimating ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 18),
-              label: Text(_controller.isAnimating ? 'Pause' : 'Play'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          IconButton(
-            icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
-            onPressed: () {
-              themeNotifier.value = isDark ? ThemeMode.light : ThemeMode.dark;
-            },
-            tooltip: 'Toggle Theme',
-          ),
-          const SizedBox(width: 16),
-        ],
-      ),
+      appBar: _buildAppBar(isMobile, isDark),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildMoodBanner(),
-          
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 0.0),
-            child: Row(
-              children: [
-                Text('Duration: ${_durationSeconds.round()}s', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
-                Expanded(
-                  child: Slider(
-                    value: _durationSeconds,
-                    min: 5,
-                    max: 60,
-                    divisions: 11, // 5, 10, 15, ..., 60
-                    label: '${_durationSeconds.round()}s',
-                    onChanged: _isLoading ? null : (val) {
-                      setState(() {
-                        _durationSeconds = val;
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // Mood banner
+          _buildMoodBanner(isMobile),
 
+          // Settings panel
+          _buildSettingsPanel(isMobile),
+
+          const SizedBox(height: 8),
+
+          // Loading indicator
           if (_isLoading)
             const Padding(
-              padding: EdgeInsets.all(24.0),
-              child: Column(
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Analyzing topographic data...', style: TextStyle(color: Colors.grey)),
-                ],
-              ),
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Column(children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 12),
+                Text('Analyzing topographic data…',
+                    style: TextStyle(color: Colors.grey, fontSize: 13)),
+              ]),
             ),
-            
+
+          // Visualizer canvas
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              padding: EdgeInsets.fromLTRB(hPad, 8, hPad, hPad),
               child: Container(
                 decoration: BoxDecoration(
                   color: isDark ? const Color(0xFF15151E) : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: isDark ? Border.all(color: Colors.indigo.withOpacity(0.1)) : null,
+                  borderRadius: BorderRadius.circular(isMobile ? 14 : 20),
+                  border: isDark
+                      ? Border.all(color: Colors.indigo.withOpacity(0.1))
+                      : null,
                   boxShadow: [
-                    if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 24, offset: const Offset(0, 8))
+                    if (!isDark)
+                      BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 20,
+                          offset: const Offset(0, 6)),
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Visualizer(
-                  image: _image,
-                  simulationData: _simulationData,
-                  currentFrame: _currentFrame,
-                ),
+                child: _image == null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.image_search_rounded,
+                                size: isMobile ? 48 : 64,
+                                color: isDark ? Colors.white24 : Colors.black12),
+                            const SizedBox(height: 12),
+                            Text('Upload an image to begin',
+                                style: TextStyle(
+                                    fontSize: isMobile ? 14 : 16,
+                                    color: isDark ? Colors.white38 : Colors.black38)),
+                          ],
+                        ),
+                      )
+                    : Visualizer(
+                        image: _image,
+                        simulationData: _simulationData,
+                        currentFrame: _currentFrame,
+                      ),
               ),
             ),
           ),

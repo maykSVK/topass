@@ -422,6 +422,27 @@ class WebAudioSynth {
     }
   }
 
+  // ── Live parameter control ────────────────────────────────────────────────
+
+  /// Master volume 0.0–1.0
+  void setMasterVolume(double vol) {
+    if (_masterGain == null || _ctx == null) return;
+    _masterGain!.gain.setTargetAtTime(vol.clamp(0.0, 1.0), _ctx!.currentTime, 0.05);
+  }
+
+  /// Reverb wet mix 0.0–1.0
+  void setReverbWet(double wet) {
+    if (_reverbWet == null || _reverbDry == null || _ctx == null) return;
+    _reverbWet!.gain.setTargetAtTime(wet.clamp(0.0, 1.0), _ctx!.currentTime, 0.05);
+    _reverbDry!.gain.setTargetAtTime((1.0 - wet).clamp(0.0, 1.0), _ctx!.currentTime, 0.05);
+  }
+
+  /// Delay time in seconds 0.0–0.5
+  void setDelayTime(double seconds) {
+    if (_delay == null || _ctx == null) return;
+    _delay!.delayTime.setTargetAtTime(seconds.clamp(0.0, 0.5), _ctx!.currentTime, 0.02);
+  }
+
   // ── Dispatcher ────────────────────────────────────────────────────────────
   void playVoice(int voice, int pitch, int velocity) {
     if (_ctx == null || _masterGain == null) return;
